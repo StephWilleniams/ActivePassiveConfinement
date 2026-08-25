@@ -11,44 +11,16 @@
 #include <utility>
 #include <yaml-cpp/yaml.h>
 
-// -----------------------------------------------------------------------------
-// Global RNG
-// -----------------------------------------------------------------------------
 std::mt19937 gen;
 std::uniform_real_distribution<> unif01(0.0, 1.0);
 std::normal_distribution<> unif01n(0.0, 1.0);
 
-// -----------------------------------------------------------------------------
-// Constants & Enums
-// -----------------------------------------------------------------------------
 enum class PotentialType { YUKAWA, WCA, ELASTIC, ENTRAINMENT };
 
 constexpr double TWO_ONE_SIXTH = 1.122462048309373; // 2^(1/6) for WCA cut-off
 constexpr double MIN_FORCE_DISTANCE = 1e-6;         // Distance floor to prevent division by zero
 constexpr double ZERO_FORCE_THRESHOLD = 1e-12;      // Minimum force magnitude to process
-
-// Single source of truth for the active swimmer's body shape. The 3 segment
-// radii (r_base, sqrt(2)*r_base, 2*r_base) and their offsets from center are
-// derived from this in the Swimmer constructor below; active_diameter and the
-// aspect-ratio-dependent drag coefficients (fpar/fperp) in main() must be
-// derived from the SAME value, or changing this to explore particle shape
-// (e.g. "stumpier" bodies) silently decouples steric collision geometry from
-// hydrodynamic drag anisotropy.
 const double SWIMMER_R_BASE = 2.0 / (4.0 + std::sqrt(2.0));
-// const double SWIMMER_R_BASE = 2.0 / (5.0 + std::sqrt(2.0));
-
-// Axial length of the assembled body. The three segments span [-1, +1] along the
-// body axis (see the Swimmer constructor), so the body length is 2 and the
-// half-body length is the non-dimensional unit of length.
-//
-// This is NOT decorative: the Tirado-Garcia de la Torre coefficients applied in
-// main() are friction PER UNIT LENGTH, so the total friction is eta_0 * L * f.
-// Tirado & Garcia de la Torre, J. Chem. Phys. 71, 2581 (1979), Eqs. (27)-(29):
-//     4 pi eta_0 L / Xi_perp = ln p + gamma_perp
-//     2 pi eta_0 L / Xi_par  = ln p + gamma_par
-// with eta_0 = 1 in these units. Omitting L makes every steric collision
-// response 2x too fast; it does not touch v_0 (added outside the mobility),
-// D_R, the boundary kick, or any passive dynamics.
 const double SWIMMER_BODY_LENGTH = 2.0;
 
 // -----------------------------------------------------------------------------
@@ -71,7 +43,7 @@ struct Config {
     double u_wake;
     double alpha;
     double alpha_rot;
-    double alpha_rot_wall;       // steric rotational coupling for WALL contact only
+    double alpha_rot_wall;
     double velocity;
     double rot_diffusion;
     double passive_diffusion;
@@ -102,18 +74,14 @@ struct Config {
 struct Swimmer {
     double x, y, theta, polarity;
     double Fx = 0.0, Fy = 0.0, torque = 0.0;
-    // Wall-contact torque, accumulated separately from particle-contact torque so the
-    // boundary's steric realignment can carry its own rotational coupling
-    // (cfg.alpha_rot_wall). See the alpha_rot_wall comment in the config reader.
     double torque_wall = 0.0;
     
-    // Kept separate from steric torque so rotational displacement caps do not suppress it.
     double torque_kick = 0.0;
     double velocity, rot_diffusion;
 
     bool is_scattering = false;
     double scatter_torque_dir = 0.0;
-    double scatter_elapsed = 0.0;  // sim time spent in the current scattering episode (kick-timeout experiment)
+    double scatter_elapsed = 0.0; 
 
     std::array<double, 3> radius;
     std::array<double, 3> segment_offsets; 
@@ -121,7 +89,6 @@ struct Swimmer {
     Swimmer(double x_pos, double y_pos, double theta_pos, double pol_pos, double vel, double rot_diff) 
         : x(x_pos), y(y_pos), theta(theta_pos), polarity(pol_pos), velocity(vel), rot_diffusion(rot_diff) 
     {
-        // Define the 3 segments making up the swimmer
         double r_base = SWIMMER_R_BASE;
         radius = { r_base, std::sqrt(2.0) * r_base, 2.0 * r_base };
         segment_offsets = {
@@ -141,7 +108,6 @@ struct Passive {
     Passive(double x_pos, double y_pos, double r) : x(x_pos), y(y_pos), radius(r) {}
 };
 
-// Struct to hold precalculated global coordinates for swimmer segments
 struct SegmentData {
     double x, y, dx_local, dy_local;
 };
@@ -279,7 +245,6 @@ void maybe_rebuild_neighbor_list(const std::vector<Swimmer>& swimmers, const std
     }
 
     if (!nl.built) {
-        // Initialise max radius conservatively, accounting for configurations lacking active swimmers
         double max_radius = (n_swimmers > 0) ? *std::max_element(swimmers[0].radius.begin(), swimmers[0].radius.end()) : 0.0;
         double max_seg_extent = 0.0;
         
@@ -552,32 +517,10 @@ void apply_boundary_kicks(std::vector<Swimmer>& swimmers, double dt, const Confi
                 }
             }
         } else {
-            // far_from_wall: swimmer's y has drifted outside boundary_threshold of both
-            // walls -- a *positional* exit test only, not an orientation check (naming it
-            // "pointing_away" previously implied theta was being re-examined here; it
-            // never was). On its own this can never trigger if steric back-torque (e.g.
-            // sustained WCA contact with a passive) keeps cancelling the kick's rotational
-            // effect, since escaping the zone requires exactly the reorientation being
-            // blocked -- so it's paired with a time-based backstop below.
             bool far_from_wall = (!near_top && !near_bottom);
 
-            // Force a reset once the current episode has run longer than one rotational
-            // persistence time (1/D_r), so the next Poisson trigger gets a freshly-aimed
-            // direction from the swimmer's *current* orientation instead of staying stuck
-            // on whatever direction was picked at the original trigger.
             s.scatter_elapsed += dt;
             bool timed_out = s.scatter_elapsed >= (1.0 / s.rot_diffusion);
-
-            // Sign-flip exit. The kick direction is latched at onset from the heading at
-            // that instant; if the swimmer subsequently turns across cos(theta) = 0, the
-            // latched sign no longer matches what the trigger rule would pick now, and the
-            // kick is pushing *against* the swimmer's current heading. Continuing to drive
-            // it that way is what lets a wall back-torque cancel the kick indefinitely --
-            // the balance needs a kick aimed the wrong way to push against. Ending the
-            // episode at the crossing removes that opportunity; the swimmer is immediately
-            // eligible for a fresh Poisson trigger, which aims from its current heading.
-            // Same sign rule as the onset trigger above, deliberately duplicated rather
-            // than factored out so the two can be read side by side.
             double ct_now = std::cos(s.theta);
             double dir_now = 0.0;
             if (near_top)         dir_now = (ct_now < 0.0) ?  1.0 : -1.0;
@@ -717,16 +660,6 @@ int main(int argc, char* argv[]) {
         cfg.u_wake               = config["physics"]["u_wake"].as<double>();
         cfg.alpha                = config["physics"]["alpha"].as<double>();
         cfg.alpha_rot            = config["physics"]["alpha_rot"].as<double>();
-        // Rotational coupling for WALL steric torque only, kept separate from alpha_rot so
-        // the boundary's realignment strength can be set independently of particle contacts
-        // and of the kick. An EMPIRICAL choice, not a derived coefficient: the three-sphere
-        // WCA body is a crude stand-in for a flagellated cell's hydrodynamic wall
-        // interaction (no lubrication, no flow field), so the contact torque it produces
-        // understates real boundary realignment. Setting alpha_rot_wall = frot (12.5828)
-        // restores the wall's angular response to its pre-zeta_R magnitude exactly, while
-        // leaving particle contacts at the corrected 1/zeta_R mobility -- so the
-        // swimmer-passive deadlocks that motivated zeta_R do NOT return.
-        // Defaults to alpha_rot, i.e. configs without the key behave exactly as before.
         cfg.alpha_rot_wall       = config["physics"]["alpha_rot_wall"]
                                  ? config["physics"]["alpha_rot_wall"].as<double>()
                                  : cfg.alpha_rot;
@@ -751,33 +684,9 @@ int main(int argc, char* argv[]) {
         else if (pot_str == "ELASTIC") cfg.potential = PotentialType::ELASTIC;
         else if (pot_str == "ENTRAINMENT") cfg.potential = PotentialType::ENTRAINMENT;
         else cfg.potential = PotentialType::YUKAWA;
-
-        // Precompute drag equations (aspRatio derived from the same SWIMMER_R_BASE
-        // as the swimmer constructor, so shape changes stay physically consistent).
-        //
-        // aspRatio is the axial ratio p = L/d of Tirado & Garcia de la Torre, taken
-        // here with d = active_diameter = 2*r_base, the smallest segment's diameter,
-        // giving p = 2.707. That sits inside the range over which their polynomial
-        // end-effect corrections were least-squares fitted (p^-1 <~ 0.5, their
-        // Fig. 1 and Eqs. 30-31); using the body's maximum diameter 4*r_base would
-        // give p = 1.354 and extrapolate the fit.
-        //
-        // The bracketed forms below are friction PER UNIT LENGTH, so both are
-        // multiplied by SWIMMER_BODY_LENGTH to obtain the total body friction
-        // (see the comment on SWIMMER_BODY_LENGTH above for the source equations).
         double aspRatio = 1.0 / SWIMMER_R_BASE;
         cfg.fpar = SWIMMER_BODY_LENGTH * 2.0 * M_PI / (std::log(aspRatio) - 0.207 + (0.980 / aspRatio) - (0.133 / (aspRatio * aspRatio)));
         cfg.fperp = SWIMMER_BODY_LENGTH * 4.0 * M_PI / (std::log(aspRatio) + 0.839 + (0.185 / aspRatio) + (0.233 / (aspRatio * aspRatio)));
-
-        // Rotational friction of the rod, same source and convention as fpar/fperp:
-        //   zeta_R = pi eta L^3 / (3 (ln p - 0.662 + 0.917/p - 0.050/p^2))
-        // Applied to the STERIC angular response only. The boundary kick is NOT divided by
-        // it, because the kick is an imposed angular velocity rather than a torque and so
-        // bypasses the mobility by construction. Omitting zeta_R (alpha_rot = 1 alone) makes
-        // the steric back-torque ~13x too mobile in angular terms, letting a contact cancel a
-        // 13.5 rad/s kick indefinitely: that produced sustained wall-contact deadlocks ended
-        // only by the kick timeout (measured 2026-08-06; 26 such episodes of 10-20 s at HRHS,
-        // all gone once this factor is present).
         double dr_rot = std::log(aspRatio) - 0.662 + (0.917 / aspRatio) - (0.050 / (aspRatio * aspRatio));
         cfg.frot = M_PI * SWIMMER_BODY_LENGTH * SWIMMER_BODY_LENGTH * SWIMMER_BODY_LENGTH / (3.0 * dr_rot);
 
@@ -799,9 +708,6 @@ int main(int argc, char* argv[]) {
         std::cerr << "Failed to open output file.\n";
         return 1;
     }
-
-    // Rows are formatted into this buffer (see output_positions) and flushed in
-    // bulk, avoiding per-double iostream formatting overhead on the hot path.
     std::vector<char> out_buf;
     out_buf.reserve(1 << 20);
     constexpr size_t OUT_BUF_FLUSH_THRESHOLD = 1 << 20;
