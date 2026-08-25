@@ -1,0 +1,32 @@
+physics:
+  alpha: 1.0
+  alpha_rot: 1.0
+  alpha_rot_wall: 1.0            # Wall-only steric rotational coupling. 1.0 = no-op: wall
+                                  # contact uses the same 1/zeta_R mobility as particle contact.
+                                  # Setting it to frot (12.5828) restores the wall's pre-zeta_R
+                                  # angular response; tested 2026-08-06 and NOT adopted -- it
+                                  # flattened the k=0 -> HRHS accumulation contrast from 2.21x
+                                  # to 1.34x for no benefit the sign-flip kick exit did not
+                                  # already provide (see n_notes/).
+  boundary_threshold: 1.5
+  force_cap: 1000.0               # Moderate ceiling on raw pairwise force (r->0/NaN + extreme-tail guard). Also indirectly bounds torque; at 1e6 the natural |omega_steric| tail reached ~4.16M rad/s, at 1000 it's ~8.2k rad/s -- a much saner distribution for max_angular_fraction to cap on top of.
+  max_step_fraction: 0.1          # Caps steric displacement per step at this fraction of active_diameter (smallest swimmer segment's diameter); grows the allowed force as dt shrinks, unlike a fixed force cap
+  max_angular_fraction: 15.0      # Caps steric angular velocity at max_angular_fraction/dt rad/s (~1500 rad/s at dt=0.01); calibrated so it only clips the genuine tail (~0.1-0.3% of encounters at dt=0.01), not routine dynamics. Boundary-kick torque (kick_torque) is exempt -- tracked separately as torque_kick.
+  kick_rate: 45.0
+  kick_torque: 13.5
+  passive_diffusion: 0.00044      # Calculated via Stokes-Einstein for a 10 μm particle - $$D = \frac{k_B T}{6 \pi \eta R}$$ ($k_B T \approx 4.11 \times 10^{-21}$ J, water viscosity $\eta \approx 10^{-3}$ Pa·s, and $R = 5 \times 10^{-6}$ m)
+  passive_radius: 0.5             # 1 μm radius (2 μm diameter)
+  potential: WCA
+  polarity: -1.0                  # ±1 body-geometry sign, applied to all swimmers
+  rot_diffusion: 0.05             # Experimental value for Chlamydomonas
+  u0: 1.0
+  u_wake: 0.5
+  velocity: 10.6                  # 106 μm/s scaled to 10 μm units
+simulation:
+  base_dt: 0.1 
+  base_steps: 100000     
+  num_passives: 80
+  num_swimmers: 25
+  seed: 42
+  x_max: 1000.0
+  y_max: 3.0

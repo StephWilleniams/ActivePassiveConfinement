@@ -1,0 +1,22 @@
+series,x,y
+translational cap (passive),0.01,0.016032225
+translational cap (passive),0.005,0.00180893125
+translational cap (passive),0.0025,0.000258490625
+translational cap (passive),0.00125,0.0001288671875
+translational cap (passive),0.000625,2.957734375e-05
+translational cap (passive),0.0003125,6.640625e-09
+translational cap (passive),0.00015625,3.125e-09
+translational cap (swimmer),0.01,0.023474
+translational cap (swimmer),0.005,0.00014622
+translational cap (swimmer),0.0025,6.6e-07
+translational cap (swimmer),0.00125,2.85e-07
+translational cap (swimmer),0.000625,3.75e-08
+translational cap (swimmer),0.0003125,3.75e-09
+force cap (swimmer),0.01,0.01535444
+force cap (swimmer),0.005,1.82e-06
+force cap (swimmer),0.0025,6.2e-07
+force cap (swimmer),0.00125,2.75e-07
+force cap (swimmer),0.000625,1.625e-07
+force cap (swimmer),0.0003125,1.35e-07
+force cap (swimmer),0.00015625,1.29375e-07
+y-clamp (swimmer),0.01,0.00870816
