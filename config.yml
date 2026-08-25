@@ -1,13 +1,7 @@
 physics:
   alpha: 1.0
   alpha_rot: 1.0
-  alpha_rot_wall: 1.0            # Wall-only steric rotational coupling. 1.0 = no-op: wall
-                                  # contact uses the same 1/zeta_R mobility as particle contact.
-                                  # Setting it to frot (12.5828) restores the wall's pre-zeta_R
-                                  # angular response; tested 2026-08-06 and NOT adopted -- it
-                                  # flattened the k=0 -> HRHS accumulation contrast from 2.21x
-                                  # to 1.34x for no benefit the sign-flip kick exit did not
-                                  # already provide (see n_notes/).
+  alpha_rot_wall: 1.0  
   boundary_threshold: 1.5
   force_cap: 1000.0               # Moderate ceiling on raw pairwise force (r->0/NaN + extreme-tail guard). Also indirectly bounds torque; at 1e6 the natural |omega_steric| tail reached ~4.16M rad/s, at 1000 it's ~8.2k rad/s -- a much saner distribution for max_angular_fraction to cap on top of.
   max_step_fraction: 0.1          # Caps steric displacement per step at this fraction of active_diameter (smallest swimmer segment's diameter); grows the allowed force as dt shrinks, unlike a fixed force cap
