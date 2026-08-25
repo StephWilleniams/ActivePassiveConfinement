@@ -3,6 +3,9 @@
 Minimal release package for the paper: the numerical simulation, its configuration,
 and the plotted data behind every figure panel.
 
+Prepared using Claude Code - Fable 5, for consistency and readability. 
+Code reviewed by SW: 08/24/26.
+
 ## Contents
 
 - `main.cpp` — the N-swimmer / N-passive Brownian-dynamics simulation
